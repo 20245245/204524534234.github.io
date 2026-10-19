@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict');const S=require('../engine.js'),R=require('../report.js');
+const input={date:'2002-05-15',time:'07:30',city:'seoul',correct:true,gender:'female'};
+const now=new Date('2026-10-19T03:00:00Z'),r=S.compute(input),f=S.forecast(r,input.gender,now);let n=0;
+function test(label,fn){fn();console.log('PASS',label);n++;}
+test('four report areas produce substantial complete readings',()=>{const x=R.build(r,f);for(const d of [x.personality,x.love,...x.annual,x.daeun]){assert.ok(d.title&&d.lead);assert.ok(d.chapters.length>=3);assert.ok(d.chapters.every(c=>c.title&&c.paragraphs.every(Boolean)));assert.ok(JSON.stringify(d).length>700);}});
+test('same inputs produce deterministic reports',()=>{assert.deepEqual(R.build(r,f),R.build(r,f));});
+test('unknown time and omitted daeun remain supported',()=>{const a=S.compute({...input,unknown:true,gender:''}),x=R.build(a,S.forecast(a,'',now));assert.equal(x.daeun,null);assert.ok(JSON.stringify(x.personality).includes('시주를 제외'));assert.ok(!JSON.stringify(x).includes('undefined'));});
+test('recognized direct six-harmony and six-clash pairs are symmetric',()=>{for(const pair of ['子丑','寅亥','卯戌','辰酉','巳申','午未']){assert.equal(R.relation(...pair),'combine');assert.equal(R.relation(...Array.from(pair).reverse()),'combine');}for(const pair of ['子午','丑未','寅申','卯酉','辰戌','巳亥'])assert.equal(R.relation(...pair),'clash');assert.equal(R.relation('子','子'),'same');assert.equal(R.relation('子','寅'),'none');});
+test('yearly reports differ and selected cycle changes narrative',()=>{const x=R.build(r,f,0),y=R.build(r,f,4);assert.notDeepEqual(x.annual[0],x.annual[1]);assert.notEqual(x.daeun.lead,y.daeun.lead);assert.notEqual(x.daeun.start,y.daeun.start);});
+test('same day stem with different natal composition changes reports',()=>{let other;for(let i=1;i<365;i++){const dt=new Date(Date.UTC(2002,4,15+i)),date=dt.toISOString().slice(0,10);const a=S.compute({...input,date});if(a.dayGan===r.dayGan&&a.pillars[2].zhi!==r.pillars[2].zhi){other=a;break;}}assert.ok(other);const a=R.build(r,f),b=R.build(other,S.forecast(other,input.gender,now));assert.notDeepEqual(a.personality,b.personality);assert.notDeepEqual(a.love,b.love);});
+test('year windows meet exactly at actual solar-term instant',()=>{const a=S.yearWindow(2026),b=S.yearWindow(2027);assert.equal(a.to,b.from);assert.ok(new Date(a.from).toISOString().startsWith('2026-02'));});
+test('all ten day stems and no AI get valid reports',()=>{for(let day=1;day<=10;day++){const x=S.compute({...input,date:'2000-01-'+String(day).padStart(2,'0')});const report=R.build(x,S.forecast(x,'male',now));assert.ok(report.personality.lead.length>50);assert.ok(!JSON.stringify(report).includes('undefined'));}});
+console.log(n+' report tests passed');

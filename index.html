@@ -1,354 +1,39 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>크레이지 아케이드</title>
-<style>
-html,body{margin:0;height:100%;background:#12203d;font-family:'Jua','Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#fff;overflow:hidden}
-body{display:flex;align-items:center;justify-content:center}
-#wrap{position:relative;line-height:0}
-canvas{border:4px solid #ffc83d;border-radius:10px;background:#0d1b3a;box-shadow:0 0 0 4px #1e3a78,0 10px 40px #0008}
-#ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(10,24,60,.88);text-align:center;line-height:1.4;border-radius:10px;padding:10px}
-#ov h1{margin:0;font-size:44px;color:#ffc83d;text-shadow:3px 3px 0 #e2412e,6px 6px 0 #0006;letter-spacing:2px}
-#ov h2{margin:0;font-size:34px;color:#7fe3ff}
-#ov p{margin:0;font-size:14px;color:#cfe3ff}
-#ov button{font:inherit;font-size:20px;padding:10px 26px;border:0;border-radius:30px;background:#ffc83d;color:#3b2200;cursor:pointer;box-shadow:0 4px 0 #b57f00;min-width:240px}
-#ov button:hover{background:#ffd966}
-#ov button:active{transform:translateY(3px);box-shadow:0 1px 0 #b57f00}
-#ov button:focus-visible{outline:3px solid #fff}
-.k{display:inline-block;background:#1e3a78;border-radius:5px;padding:0 6px;margin:0 1px}
-</style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#faf9f6"><meta name="description" content="태어난 날에 담긴 나의 결. 온결에서 사주 원국과 오행을 쉽고 차분하게 만나보세요.">
+<title>온결 — 태어난 날에 담긴, 나의 결</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css">
+<script defer src="vendor/lunar.js"></script><script defer src="engine.js"></script><script defer src="report.js"></script><script defer src="insights.js"></script><script defer src="app.js"></script>
 </head>
 <body>
-<div id="wrap">
-<canvas id="c"></canvas>
-<div id="ov"></div>
-</div>
-<script>
-const T=40,W=15,H=13,OY=62;
-const cv=document.getElementById('c'),g=cv.getContext('2d'),ov=document.getElementById('ov');
-cv.width=W*T;cv.height=H*T+OY;
-const COLORS=['#ff4d4d','#4d8dff','#3ddc84','#ffd13d'];
-const NAMES=['빨강','파랑','초록','노랑'];
-const SP=[[0,0],[W-1,H-1],[W-1,0],[0,H-1]];
-const D4=[[1,0],[-1,0],[0,1],[0,-1]];
-const DIRS={l:[-1,0],r:[1,0],u:[0,-1],d:[0,1]};
-let grid,balloons,flames,items,players,parts,state='menu',mode=1,time=0,endT=0,result='',clock=0;
-const stacks=[[],[]];
-
-/* ---------- audio ---------- */
-let ac;
-function beep(f=300,d=.12,type='square',v=.04){try{ac=ac||new AudioContext();const o=ac.createOscillator(),n=ac.createGain(),t=ac.currentTime;o.type=type;o.frequency.setValueAtTime(f,t);o.frequency.exponentialRampToValueAtTime(Math.max(30,f/3),t+d);n.gain.setValueAtTime(v,t);n.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(n);n.connect(ac.destination);o.start();o.stop(t+d)}catch(e){}}
-
-/* ---------- setup ---------- */
-function start(m){
-  mode=m;
-  grid=[];
-  for(let y=0;y<H;y++){grid[y]=[];for(let x=0;x<W;x++)grid[y][x]=(x%2&&y%2)?1:(Math.random()<.62?2:0);}
-  for(const [sx,sy] of SP)for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(Math.abs(x-sx)+Math.abs(y-sy)<=2&&grid[y][x]==2)grid[y][x]=0;
-  balloons=[];flames=[];items=[];parts=[];
-  const ctrls=m==1?['h1','bot','bot','bot']:['h1','h2','bot','bot'];
-  players=ctrls.map((c,i)=>({i,ctrl:c,c:COLORS[i],x:(SP[i][0]+.5)*T,y:(SP[i][1]+.5)*T,spd:120,maxB:1,rng:2,alive:true,trap:0,face:[0,1],cd:0,idle:0,anim:0,moving:false,hunt:Math.random()<.4}));
-  stacks[0].length=stacks[1].length=0;
-  time=150;endT=0;result='';state='play';ov.style.display='none';
-}
-function menu(){
-  state='menu';ov.style.display='flex';
-  ov.innerHTML=`<h1>CRAZY ARCADE</h1><p>물풍선으로 블록을 부수고, 상대를 물방울에 가두세요!</p>
-  <button onclick="start(1)">1인 플레이 (vs 봇 3)</button>
-  <button onclick="start(2)">2인 대전 (+ 봇 2)</button>
-  <p><b>P1</b> 이동 <span class="k">←↑↓→</span> / <span class="k">WASD</span> · 풍선 <span class="k">Space</span><br>
-  <b>P2</b> 이동 <span class="k">WASD</span> · 풍선 <span class="k">F</span><br>
-  아이템: 💧풍선 +1 · 🌊물줄기 +1 · 👟속도 +1<br>
-  물방울에 갇힌 적을 몸으로 터뜨리면 탈락! (갇힌 지 4초가 지나도 탈락)</p>`;
-}
-function endGame(txt,sub){
-  state='over';ov.style.display='flex';
-  ov.innerHTML=`<h2>${txt}</h2><p>${sub||''}</p><button onclick="start(mode)">다시 하기</button><button onclick="menu()">메뉴로</button>`;
-}
-
-/* ---------- helpers ---------- */
-function solidAt(gx,gy,p){
-  if(gx<0||gy<0||gx>=W||gy>=H||grid[gy][gx])return true;
-  for(const b of balloons)if(b.gx==gx&&b.gy==gy&&!b.pass.includes(p))return true;
-  return false;
-}
-function blocked(p,nx,ny){
-  const h=14;
-  for(const sx of[-h,h])for(const sy of[-h,h])if(solidAt(Math.floor((nx+sx)/T),Math.floor((ny+sy)/T),p))return true;
-  return false;
-}
-function move(p,dx,dy,dt){
-  const s=p.spd*dt*(p.trap>0?.35:1);
-  if(dx){
-    const nx=p.x+dx*s;
-    if(!blocked(p,nx,p.y))p.x=nx;
-    else{const o=(Math.floor(p.y/T)+.5)*T-p.y;if(Math.abs(o)>.5&&Math.abs(o)<=16){const m=Math.sign(o)*Math.min(Math.abs(o),s);if(!blocked(p,p.x,p.y+m))p.y+=m;}}
-  }
-  if(dy){
-    const ny=p.y+dy*s;
-    if(!blocked(p,p.x,ny))p.y=ny;
-    else{const o=(Math.floor(p.x/T)+.5)*T-p.x;if(Math.abs(o)>.5&&Math.abs(o)<=16){const m=Math.sign(o)*Math.min(Math.abs(o),s);if(!blocked(p,p.x+m,p.y))p.x+=m;}}
-  }
-}
-function place(p){
-  if(state!='play'||!p||!p.alive||p.trap>0)return;
-  const gx=p.x/T|0,gy=p.y/T|0;
-  if(balloons.some(b=>b.gx==gx&&b.gy==gy)||balloons.filter(b=>b.o==p).length>=p.maxB)return;
-  balloons.push({gx,gy,t:2.4,o:p,r:p.rng,pass:players.filter(q=>q.alive&&Math.abs(q.x-(gx+.5)*T)<T/2+14&&Math.abs(q.y-(gy+.5)*T)<T/2+14)});
-  beep(420,.08,'sine',.05);
-}
-function addFlame(x,y){flames.push({gx:x,gy:y,t:.45});items=items.filter(i=>!(i.gx==x&&i.gy==y));}
-function boom(b){
-  balloons.splice(balloons.indexOf(b),1);beep(130,.3,'sawtooth',.06);
-  addFlame(b.gx,b.gy);
-  for(const [dx,dy] of D4)for(let i=1;i<=b.r;i++){
-    const x=b.gx+dx*i,y=b.gy+dy*i;
-    if(x<0||y<0||x>=W||y>=H||grid[y][x]==1)break;
-    if(grid[y][x]==2){grid[y][x]=0;addFlame(x,y);if(Math.random()<.35)items.push({gx:x,gy:y,k:'brs'[Math.random()*3|0]});break;}
-    const ob=balloons.find(q=>q.gx==x&&q.gy==y);
-    addFlame(x,y);
-    if(ob){ob.t=Math.min(ob.t,.04);break;}
-  }
-}
-function kill(p){
-  p.alive=false;beep(90,.5,'triangle',.07);
-  for(let i=0;i<22;i++){const a=Math.random()*6.28,v=60+Math.random()*140;parts.push({x:p.x,y:p.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,t:.7,c:i%2?p.c:'#9fe6ff'});}
-}
-
-/* ---------- bot ai ---------- */
-const solid=(x,y)=>x<0||y<0||x>=W||y>=H||grid[y][x]||balloons.some(b=>b.gx==x&&b.gy==y);
-function danger(extra){
-  const d=new Set(),add=(x,y)=>d.add(y*W+x);
-  for(const f of flames)add(f.gx,f.gy);
-  for(const b of extra?[...balloons,extra]:balloons){
-    add(b.gx,b.gy);
-    for(const [dx,dy] of D4)for(let i=1;i<=b.r;i++){
-      const x=b.gx+dx*i,y=b.gy+dy*i;
-      if(x<0||y<0||x>=W||y>=H||grid[y][x])break;
-      add(x,y);
-      if(balloons.some(q=>q.gx==x&&q.gy==y))break;
-    }
-  }
-  return d;
-}
-function bfs(sx,sy,goal,avoid,maxD=16){
-  const q=[[sx,sy,null,0]],seen=new Set([sy*W+sx]);
-  for(let i=0;i<q.length;i++){
-    const [x,y,f,d]=q[i];
-    if(goal(x,y))return{f,d};
-    if(d>=maxD)continue;
-    for(const [dx,dy] of D4){
-      const nx=x+dx,ny=y+dy,k=ny*W+nx;
-      if(solid(nx,ny)||seen.has(k)||avoid.has(k))continue;
-      seen.add(k);q.push([nx,ny,f||[nx,ny],d+1]);
-    }
-  }
-  return null;
-}
-function ai(p,dt){
-  if(p.trap>0)return[0,0];
-  const gx=p.x/T|0,gy=p.y/T|0,me=gy*W+gx;
-  const dg=danger(),fl=new Set(flames.map(f=>f.gy*W+f.gx));
-  let tgt=null;
-  if(dg.has(me)){
-    const r=bfs(gx,gy,(x,y)=>!dg.has(y*W+x),fl);tgt=r&&r.f;
-  }else{
-    p.cd-=dt;
-    const canB=balloons.filter(b=>b.o==p).length<p.maxB;
-    const en=players.filter(q=>q!=p&&q.alive);
-    if(p.cd<=0&&canB){
-      const nearBlock=D4.some(([dx,dy])=>grid[gy+dy]&&grid[gy+dy][gx+dx]==2);
-      const nearEnemy=en.some(q=>{const ex=q.x/T|0,ey=q.y/T|0;return(ex==gx&&Math.abs(ey-gy)<=p.rng)||(ey==gy&&Math.abs(ex-gx)<=p.rng)});
-      if(nearBlock||nearEnemy){
-        const d2=danger({gx,gy,r:p.rng});
-        const r=bfs(gx,gy,(x,y)=>!d2.has(y*W+x),fl,6);
-        if(r){place(p);p.cd=.5+Math.random()*.9;return[0,0];}
-      }
-    }
-    const trapped=en.find(q=>q.trap>0);
-    let r=null;
-    if(trapped){const tx=trapped.x/T|0,ty=trapped.y/T|0;r=bfs(gx,gy,(x,y)=>x==tx&&y==ty,dg);}
-    if(!r)r=bfs(gx,gy,(x,y)=>items.some(i=>i.gx==x&&i.gy==y),dg,7);
-    if(!r&&p.hunt&&en.length){r=bfs(gx,gy,(x,y)=>en.some(q=>(q.x/T|0)==x&&(q.y/T|0)==y),dg);}
-    if(!r)r=bfs(gx,gy,(x,y)=>D4.some(([dx,dy])=>grid[y+dy]&&grid[y+dy][x+dx]==2),dg);
-    if(r&&r.f)tgt=r.f;
-    if(!tgt){
-      p.idle+=dt;
-      if(p.idle>1.2){
-        const opts=D4.map(([dx,dy])=>[gx+dx,gy+dy]).filter(([x,y])=>!solid(x,y)&&!dg.has(y*W+x));
-        if(opts.length)tgt=opts[Math.random()*opts.length|0];
-        if(p.idle>1.8){p.idle=0;p.hunt=Math.random()<.5;}
-      }
-    }else p.idle=0;
-  }
-  if(!tgt)return[0,0];
-  const cx=(tgt[0]+.5)*T,cy=(tgt[1]+.5)*T,ax=(gx+.5)*T,ay=(gy+.5)*T;
-  if(tgt[0]!=gx)return Math.abs(p.y-ay)>3?[0,Math.sign(ay-p.y)]:[Math.sign(cx-p.x),0];
-  return Math.abs(p.x-ax)>3?[Math.sign(ax-p.x),0]:[0,Math.sign(cy-p.y)];
-}
-
-/* ---------- update ---------- */
-function update(dt){
-  time-=dt;
-  for(const p of players){
-    if(!p.alive)continue;
-    p.anim+=dt;
-    let dx=0,dy=0;
-    if(p.ctrl=='bot'){[dx,dy]=ai(p,dt);}
-    else{const st=stacks[p.ctrl=='h1'?0:1],d=st[st.length-1];if(d){dx=DIRS[d][0];dy=DIRS[d][1];}}
-    p.moving=!!(dx||dy);
-    if(p.moving)p.face=[dx,dy];
-    move(p,dx,dy,dt);
-    const gx=p.x/T|0,gy=p.y/T|0;
-    const it=items.findIndex(i=>i.gx==gx&&i.gy==gy);
-    if(it>=0){
-      const k=items[it].k;items.splice(it,1);beep(900,.12,'sine',.05);
-      if(k=='b')p.maxB=Math.min(7,p.maxB+1);else if(k=='r')p.rng=Math.min(8,p.rng+1);else p.spd=Math.min(230,p.spd+22);
-    }
-    if(p.trap<=0&&flames.some(f=>f.gx==gx&&f.gy==gy)){p.trap=4;beep(600,.3,'sine',.06);}
-    if(p.trap>0){
-      p.trap-=dt;
-      if(p.trap<=0)kill(p);
-      else if(players.some(q=>q!=p&&q.alive&&q.trap<=0&&Math.hypot(q.x-p.x,q.y-p.y)<26))kill(p);
-    }
-  }
-  for(const b of [...balloons]){b.t-=dt;if(b.t<=0&&balloons.includes(b))boom(b);}
-  for(const b of balloons)b.pass=b.pass.filter(q=>q.alive&&Math.abs(q.x-(b.gx+.5)*T)<T/2+14&&Math.abs(q.y-(b.gy+.5)*T)<T/2+14);
-  for(const f of flames)f.t-=dt;
-  flames=flames.filter(f=>f.t>0);
-  for(const q of parts){q.t-=dt;q.x+=q.vx*dt;q.y+=q.vy*dt;q.vx*=.95;q.vy*=.95;}
-  parts=parts.filter(q=>q.t>0);
-  if(!endT){
-    const alive=players.filter(p=>p.alive);
-    if(alive.length<=1){
-      endT=1.6;
-      const w=alive[0];
-      result=!w?'draw':(w.ctrl=='bot'?'bot'+w.i:w.ctrl);
-    }else if(time<=0){endT=.5;result='draw';}
-  }else{
-    endT-=dt;
-    if(endT<=0){
-      if(result=='draw')endGame('무승부','아무도 끝까지 살아남지 못했어요.');
-      else if(result=='h1')endGame(mode==1?'승리! 🎉':'P1 (빨강) 승리! 🎉','물풍선 마스터!');
-      else if(result=='h2')endGame('P2 (파랑) 승리! 🎉','물풍선 마스터!');
-      else endGame(mode==1?'패배...':'봇 승리','봇 '+NAMES[+result.slice(3)]+'이(가) 마지막까지 살아남았어요.');
-    }
-  }
-}
-
-/* ---------- render ---------- */
-function circ(x,y,r,c){g.fillStyle=c;g.beginPath();g.arc(x,y,r,0,6.283);g.fill();}
-function rr(x,y,w,h,r,c){g.fillStyle=c;g.beginPath();g.roundRect(x,y,w,h,r);g.fill();}
-function drawHUD(){
-  g.fillStyle='#14305f';g.fillRect(0,0,cv.width,OY);
-  g.fillStyle='#ffc83d';g.font='bold 16px sans-serif';g.textAlign='left';g.textBaseline='middle';
-  g.fillText('CRAZY ARCADE',10,14);
-  const t=Math.max(0,time)|0;
-  g.textAlign='right';g.fillStyle='#fff';g.fillText('⏱ '+(t/60|0)+':'+String(t%60).padStart(2,'0'),cv.width-10,14);
-  players.forEach((p,i)=>{
-    const x=i*150+4;
-    rr(x,28,142,30,8,p.alive?'#1f4a8f':'#222b3d');
-    circ(x+14,43,9,p.alive?p.c:'#555');
-    g.textAlign='left';g.font='bold 12px sans-serif';g.fillStyle=p.alive?'#fff':'#888';
-    const nm=(p.ctrl=='bot'?'🤖':p.ctrl=='h1'?'P1':'P2')+' '+NAMES[i];
-    g.fillText(nm,x+28,37);
-    g.font='11px sans-serif';
-    g.fillText(p.alive?`💧${p.maxB} 🌊${p.rng} 👟${(p.spd-120)/22+1|0}`:'💀 탈락',x+28,51);
-  });
-}
-function drawPlayer(p,now){
-  if(!p.alive)return;
-  const wob=p.trap>0?Math.sin(now*8)*2:0;
-  const x=p.x,y=p.y+wob+(p.moving&&p.trap<=0?Math.sin(p.anim*14)*1.5:0);
-  g.fillStyle='rgba(0,0,0,.25)';g.beginPath();g.ellipse(p.x,p.y+14,13,5,0,0,6.283);g.fill();
-  circ(x,y-1,15,'#222');circ(x,y-1,13.5,p.c);
-  circ(x,y+1,10,'#ffe2bd');
-  g.fillStyle=p.c;g.beginPath();g.arc(x,y-3,12,3.4,6.02);g.fill();
-  const fx=p.face[0]*2.5,fy=p.face[1]*2;
-  circ(x-4+fx,y+1+fy,2.1,'#222');circ(x+4+fx,y+1+fy,2.1,'#222');
-  if(p.trap>0){
-    const a=.35+.15*Math.sin(now*10);
-    g.fillStyle=`rgba(120,210,255,${a})`;g.beginPath();g.arc(x,y,23,0,6.283);g.fill();
-    g.strokeStyle='#eaffff';g.lineWidth=2;g.stroke();
-    g.strokeStyle='#fff';g.lineWidth=3;g.beginPath();g.arc(x,y-28,6,-1.57,-1.57+6.283*p.trap/4);g.stroke();
-  }
-  if(p.ctrl!='bot'){g.fillStyle='#fff';g.font='bold 11px sans-serif';g.textAlign='center';g.fillText(p.ctrl=='h1'?'P1':'P2',x,y-24);}
-}
-function draw(now){
-  g.clearRect(0,0,cv.width,cv.height);
-  if(!grid){g.fillStyle='#0d1b3a';g.fillRect(0,0,cv.width,cv.height);return;}
-  drawHUD();
-  g.save();g.translate(0,OY);
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-    g.fillStyle=(x+y)%2?'#bfe9a0':'#b2de93';g.fillRect(x*T,y*T,T,T);
-    const v=grid[y][x];
-    if(v==1){
-      rr(x*T+1,y*T+1,T-2,T-2,5,'#3b4b9e');rr(x*T+3,y*T+3,T-6,T-10,4,'#6f82e0');
-      g.fillStyle='#a9b6ff';g.fillRect(x*T+7,y*T+7,T-14,3);
-    }else if(v==2){
-      rr(x*T+2,y*T+3,T-4,T-4,4,'#9a5a1b');rr(x*T+2,y*T+2,T-4,T-7,4,'#e8a04a');
-      g.strokeStyle='#b8741f';g.lineWidth=2;g.strokeRect(x*T+8,y*T+8,T-16,T-18);
-      g.fillStyle='#ffd08a';g.fillRect(x*T+5,y*T+5,T-10,2);
-    }
-  }
-  for(const i of items){
-    const cx=(i.gx+.5)*T,cy=(i.gy+.5)*T+Math.sin(now*4+i.gx)*2;
-    circ(cx,cy,14,'#fff');circ(cx,cy,12,i.k=='b'?'#3a8dff':i.k=='r'?'#18b5c9':'#ff8c3a');
-    g.font='15px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillStyle='#fff';
-    g.fillText(i.k=='b'?'💧':i.k=='r'?'🌊':'👟',cx,cy+1);
-  }
-  for(const b of balloons){
-    const cx=(b.gx+.5)*T,cy=(b.gy+.5)*T,pul=Math.sin(now*9+b.gx)*1.5,fl=b.t<.7&&((now*14)|0)%2;
-    g.fillStyle='rgba(0,0,0,.2)';g.beginPath();g.ellipse(cx,cy+13,12,4,0,0,6.283);g.fill();
-    circ(cx,cy,15+pul,'#1b4fa8');circ(cx,cy,13.5+pul,fl?'#ff9a9a':'#47a8ff');
-    circ(cx-4,cy-5,4,'rgba(255,255,255,.8)');
-    g.fillStyle='#1b4fa8';g.beginPath();g.moveTo(cx-3,cy-14);g.lineTo(cx+3,cy-14);g.lineTo(cx,cy-18);g.fill();
-  }
-  for(const f of flames){
-    const a=Math.min(1,f.t/.3);
-    rr(f.gx*T+3,f.gy*T+3,T-6,T-6,12,`rgba(60,190,255,${a*.9})`);
-    rr(f.gx*T+10,f.gy*T+10,T-20,T-20,8,`rgba(255,255,255,${a*.9})`);
-  }
-  players.slice().sort((a,b)=>a.y-b.y).forEach(p=>drawPlayer(p,now));
-  for(const q of parts){g.globalAlpha=Math.min(1,q.t*2);circ(q.x,q.y,3.5,q.c);}
-  g.globalAlpha=1;
-  g.restore();
-}
-
-/* ---------- input ---------- */
-const KM={ArrowLeft:[0,'l'],ArrowRight:[0,'r'],ArrowUp:[0,'u'],ArrowDown:[0,'d'],KeyA:[1,'l'],KeyD:[1,'r'],KeyW:[1,'u'],KeyS:[1,'d']};
-addEventListener('keydown',e=>{
-  if(KM[e.code]){
-    e.preventDefault();
-    const pi=mode==1?0:KM[e.code][0],st=stacks[pi],d=KM[e.code][1];
-    if(!st.includes(d))st.push(d);
-  }else if(e.code=='Space'){e.preventDefault();if(!e.repeat&&state=='play')place(players[0]);}
-  else if(e.code=='KeyF'&&!e.repeat&&state=='play')place(mode==1?players[0]:players[1]);
-});
-addEventListener('keyup',e=>{
-  if(KM[e.code]){const pi=mode==1?0:KM[e.code][0],st=stacks[pi],i=st.indexOf(KM[e.code][1]);if(i>=0)st.splice(i,1);}
-});
-addEventListener('blur',()=>{stacks[0].length=stacks[1].length=0;});
-
-/* ---------- loop / resize ---------- */
-function fit(){
-  const s=Math.min((innerWidth-24)/(cv.width+8),(innerHeight-24)/(cv.height+8),1.6);
-  cv.style.width=cv.width*s+'px';cv.style.height=cv.height*s+'px';
-  ov.style.fontSize=Math.max(.6,s)+'em';
-}
-addEventListener('resize',fit);fit();
-let last=performance.now();
-function loop(t){
-  const dt=Math.min(.05,(t-last)/1000);last=t;
-  if(state=='play'||state=='over'&&endT>0)update(dt);
-  else if(state=='over'){for(const q of parts){q.t-=dt;}}
-  draw(t/1000);
-  requestAnimationFrame(loop);
-}
-menu();
-requestAnimationFrame(loop);
-</script>
-</body>
-</html>
+<a class="skip" href="#main">본문으로 이동</a>
+<header class="site-header"><a class="brand" href="#home" aria-label="온결 홈"><span class="brand-icon">✳</span> 온결<span class="brand-sub">나를 읽는 시간</span></a><nav aria-label="주 메뉴"><button data-about>온결 이야기</button><a href="#guide">이용 안내</a><a href="#form" class="nav-start">내 사주 보기 <span>↗</span></a></nav><button class="menu-button" aria-label="메뉴 열기" aria-expanded="false">☰</button></header>
+<main id="main">
+<section id="home-view" class="view">
+<div class="hero shell"><div class="hero-copy"><span class="eyebrow"><span class="tiny-star">✦</span> 태어난 날에 담긴 작은 단서</span><h1>나도 몰랐던 나를,<br>조금 더 <span class="highlight">다정하게.</span></h1><p class="hero-description">어느 날, 어느 계절에 태어난 당신.<br>여덟 글자에 담긴 나의 결을 만나보세요.<br>어려운 사주는 쉽게, 나에 대한 이해는 깊게.</p><a class="button primary" href="#form">나의 사주 펼쳐보기 <span>↗</span></a><p class="microcopy"><span>◈</span> 회원가입 없이 · 입력 정보는 내 브라우저 안에서</p></div>
+<div class="hero-art" aria-label="사주표와 다섯 오행을 표현한 일러스트">
+<div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div><span class="art-star s-one">✧</span><span class="art-star s-two">✦</span><span class="art-star s-three">✧</span><span class="orbit-dot"></span><div class="art-caption">EVERY BIRTH HAS A STORY</div>
+<div class="main-card"><div class="card-top"><span class="sun-face">☀</span><div><span class="card-kicker">태어난 날의 이야기</span><h2>나만의 사주, 나만의 결</h2></div><span class="card-spark">✦</span></div><div class="mini-pillars"><div><small>시주</small><b class="wood">乙</b><b class="fire">巳</b></div><div class="day-pillar"><small>일주 <i>나</i></small><b class="fire">丁</b><b class="earth">未</b></div><div><small>월주</small><b class="fire">丁</b><b class="wood">卯</b></div><div><small>년주</small><b class="wood">甲</b><b class="earth">戌</b></div></div><div class="art-card-bottom"><span>목 · 화 · 토 · 금 · 수</span><span>나를 이루는 다섯 가지 기운</span></div></div>
+<div class="floating-card float-top"><span class="leaf-symbol">木</span><div><small>저마다 다른 빛으로</small><strong>당신답게 자라는 중</strong></div><span>✧</span></div><div class="floating-card float-bottom"><div class="mini-donut"></div><div><small>다섯 가지 기운의 조화</small><strong>나를 이해하는 새로운 시선</strong></div></div><span class="art-sample">이해를 돕기 위한 사주표 예시입니다</span>
+</div></div>
+<div class="intro-strip shell"><span>정해진 운명보다,<br><b>나를 알아가는 가능성.</b></span><p>사주는 나를 설명하는 하나의 언어예요.<br>온결은 어려운 한자 너머, 일상에 닿는 이야기를 전합니다.</p><span class="strip-flower" aria-hidden="true">✳</span></div>
+<section class="discover shell" id="discover"><div class="section-heading"><div><span class="eyebrow">A LITTLE MORE ABOUT YOU</span><h2>한 장씩 펼치는, 나의 이야기</h2></div><p>복잡한 사주도 차근차근 들여다보면<br>조금 더 친숙해질 거예요.</p></div><div class="feature-grid"><article><span class="feature-icon icon-green">八</span><span class="feature-number">01</span><h3>태어난 날의 여덟 글자</h3><p>년·월·일·시 네 개의 기둥으로<br>나의 사주 원국을 한눈에 살펴봐요.</p><span class="feature-tag">사주 원국 · 나의 일간</span></article><article><span class="feature-icon icon-yellow">◎</span><span class="feature-number">02</span><h3>나를 이루는 다섯 기운</h3><p>목·화·토·금·수의 분포를 보고<br>내 안의 서로 다른 결을 알아봐요.</p><span class="feature-tag">오행 분포 · 성격과 연애의 결</span></article><article><span class="feature-icon icon-purple">✧</span><span class="feature-number">03</span><h3>한자에서 일상의 언어로</h3><p>대운과 올해·내년의 흐름까지.<br>낯선 단어에는 쉬운 설명을 곁들였어요.</p><span class="feature-tag">쉬운 풀이 · 계산 기준 공개</span></article></div></section>
+<section id="guide" class="guide shell"><div><span class="eyebrow">BEFORE WE BEGIN</span><h2>궁금한 것부터,<br>가볍게 풀어볼까요?</h2><p>처음이어도 괜찮아요.<br>알고 있는 만큼만 들려주세요.</p></div><div class="faq"><details><summary>태어난 시간을 몰라도 볼 수 있나요?<span>+</span></summary><p>네. ‘시간을 몰라요’를 선택하면 시주는 미상으로 표시하고, 나머지 세 기둥의 오행을 보여드려요. 다만 자정이나 절기 경계에 태어났다면 일주·월주·년주도 달라질 수 있어요.</p></details><details><summary>양력과 음력 모두 지원하나요?<span>+</span></summary><p>현재 버전은 1970~2026년 한국 출생자의 양력 입력을 지원해요. 음력은 한국 음양력 변환 자료를 검증한 뒤 지원할 예정입니다. 음력 생일은 확인된 양력 날짜로 변환해서 입력해주세요.</p></details><details><summary>다른 만세력과 결과가 다를 수 있나요?<span>+</span></summary><p>출생지 보정, 서머타임, 자시 경계와 날짜가 바뀌는 기준에 따라 달라질 수 있어요. 온결은 적용 기준과 보정 시각을 결과에서 함께 보여드려요. 아래 ‘계산 기준’에서 자세히 확인할 수 있습니다.</p></details><details><summary>입력한 생년월일은 저장되나요?<span>+</span></summary><p>입력 정보는 서버에 전송하거나 브라우저 저장소에 보관하지 않아요. 결과를 보는 동안 현재 페이지의 메모리에서만 사용하며, 새로고침하면 사라집니다.</p></details></div></section>
+<section class="closing shell"><span aria-hidden="true">✦</span><h2>당신의 시작에는,<br>어떤 이야기가 담겨 있을까요?</h2><a class="button primary" href="#form">내 이야기 만나러 가기 <span>↗</span></a></section>
+</section>
+<section id="form-view" class="view" hidden><div class="form-layout shell"><aside class="form-aside"><a href="#home" class="back-link">← 처음으로</a><span class="eyebrow">YOUR STORY STARTS HERE</span><h1>당신의 이야기는,<br>어느 날 시작됐나요?</h1><p>태어난 날과 시간을 알려주세요.<br>그날의 기운을 차근차근 펼쳐드릴게요.</p><div class="form-art" aria-hidden="true"><span>✳</span><i>모든 날에는 저마다의 빛이 있어요</i></div><div class="privacy-note"><span>◈</span><p>입력한 정보는 서버로 보내지 않아요.<br>오직 지금, 나의 이야기를 읽는 데만 사용해요.</p></div></aside>
+<form id="birth-form" class="form-card"><div class="step-label"><span>01 정보 입력</span><span>02 확인</span><span>03 나의 사주</span></div><h2>나의 기본 정보</h2><p class="form-lead">이름은 별명이어도 좋아요.</p><div class="field"><label for="name">이름 또는 별명 <small>선택</small></label><input id="name" name="name" maxlength="12" placeholder="어떻게 불러드릴까요?" autocomplete="off"></div>
+<div class="field"><label for="birth-date">생년월일 <span class="required">*</span></label><div class="date-row"><span class="calendar-label">양력</span><input type="date" id="birth-date" name="date" min="1970-01-01" max="2026-12-31" required aria-describedby="date-help"></div><p class="field-help" id="date-help">1970~2026년 · 한국 출생 · 양력 날짜로 입력해주세요.</p></div>
+<div class="field"><div class="label-row"><label for="birth-time">태어난 시간 <span class="required time-required">*</span></label><button type="button" class="text-button" id="time-guide">12간지 시간표 ↗</button></div><input type="time" id="birth-time" name="time" required><label class="check-label"><input type="checkbox" id="unknown-time"> 시간을 몰라요</label></div>
+<div class="field"><label for="city">태어난 도시 <span class="required">*</span></label><select id="city" name="city" required><option value="">출생 도시를 선택해주세요</option><option value="seoul">서울</option><option value="busan">부산</option><option value="incheon">인천</option><option value="daegu">대구</option><option value="daejeon">대전</option><option value="gwangju">광주</option><option value="ulsan">울산</option><option value="sejong">세종</option><option value="suwon">수원</option><option value="chuncheon">춘천</option><option value="gangneung">강릉</option><option value="cheongju">청주</option><option value="jeonju">전주</option><option value="jeju">제주</option></select><p class="field-help">국내 대표 도시의 경도를 사용해요. 가까운 도시를 선택할 수 있지만 출생지가 다르면 경계 시각의 시주가 달라질 수 있어요.</p></div>
+<div class="field"><label for="daeun-gender">대운 계산 기준 <small>선택</small></label><select id="daeun-gender"><option value="">선택하지 않음 · 대운 제외</option><option value="female">여성 기준</option><option value="male">남성 기준</option></select><p class="field-help">전통 대운의 순행·역행을 정할 때만 사용해요. 성격·연애 해설은 성별로 나누지 않아요.</p></div>
+<details class="settings"><summary>계산 설정 <span>+</span></summary><label class="check-label"><input type="checkbox" id="solar-correction" checked> 출생지 경도와 균시차로 시각 보정</label><p>진태양시 근사값을 사용해요. 결과에서 보정 전후를 확인할 수 있어요.</p><p>자시는 23:00~01:00, 일주는 자정(00:00)에 변경합니다. 한국 서머타임은 자동 보정하며, 년·월주는 출생 순간의 절기를 기준으로 계산합니다.</p></details>
+<p class="form-error" id="form-error" role="alert"></p><button class="button primary submit-button" type="submit">입력 정보 확인하기 <span>→</span></button><p class="form-footnote">미래를 단정하는 예언보다, 나를 이해하는 참고로 즐겨주세요.</p></form></div></section>
+<section id="result-view" class="view" hidden><div class="shell result-shell"><div class="result-topline"><a href="#form" class="back-link">← 입력 정보 수정</a><button class="text-button" id="print-result">결과 인쇄하기 ↗</button></div><div id="result-content"></div><div class="result-end"><p>사주는 나를 이해하는 하나의 관점.<br>당신의 가능성은 여덟 글자보다 훨씬 넓어요.</p><button class="button primary" id="another">다른 사주 살펴보기 <span>↗</span></button></div></div></section>
+</main>
+<footer class="site-footer shell"><a class="brand" href="#home"><span class="brand-icon">✳</span> 온결</a><p>태어난 날에 담긴, 나의 결.</p><div><button data-about>계산 기준 및 안내</button><span>© 2026 ON:GYEOL</span></div></footer>
+<dialog id="info-dialog" aria-labelledby="dialog-title"><button class="dialog-close" aria-label="닫기">×</button><div id="dialog-body"></div></dialog>
+<noscript><p class="noscript">사주를 계산하려면 브라우저의 JavaScript를 켜주세요.</p></noscript>
+</body></html>
